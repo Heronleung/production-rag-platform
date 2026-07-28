@@ -34,6 +34,16 @@ KNOWN_EMBEDDING_DIMS: dict[tuple[str, str], int] = {
     ("ollama", "all-minilm"): 384,
 }
 
+# Rough footprint of the local chat models this project has been run against.
+# Kept here purely as documentation for anyone choosing a value for
+# OLLAMA_LLM_MODEL; nothing reads this at runtime.
+OLLAMA_LLM_NOTES: dict[str, str] = {
+    "qwen2.5:0.5b": "~0.4GB, smoke tests only - too weak for benchmark numbers",
+    "qwen2.5:1.5b": "~1.0GB, default - runs on CPU, decent Chinese, weaker citation discipline",
+    "llama3.2:3b": "~2.0GB, better instruction following, still CPU-friendly",
+    "llama3.1:8b": "~4.7GB, best quality of the four, wants a GPU or 16GB+ RAM",
+}
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -55,7 +65,9 @@ class Settings(BaseSettings):
     # ---- Ollama ----------------------------------------------------------
     ollama_base_url: str = "http://localhost:11434"
     ollama_embedding_model: str = "nomic-embed-text"
-    ollama_llm_model: str = "llama3.1:8b"
+    # A small default on purpose: the local path has to stay usable on a laptop
+    # with no GPU. See OLLAMA_LLM_NOTES for heavier options.
+    ollama_llm_model: str = "qwen2.5:1.5b"
     ollama_timeout_seconds: float = 120.0
 
     # ---- Milvus ----------------------------------------------------------
