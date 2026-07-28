@@ -1,0 +1,12 @@
+[
+  "What index types does the vector database support?",
+  "How is the retrieval latency measured end to end?",
+  "Which embedding model is used for ingestion?",
+  "How are documents split into chunks before embedding?",
+  "What happens when the retriever finds no relevant context?",
+  "How is the service deployed to Kubernetes?",
+  "Which metrics are exported to Prometheus?",
+  "How does the system prevent hallucinated answers?",
+  "What is the rollback procedure for a failed deployment?",
+  "How are API keys and secrets managed?"
+]
