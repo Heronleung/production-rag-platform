@@ -1,0 +1,38 @@
+# Local model runtime. Nothing here needs an API key or an internet connection
+# once the models are pulled.
+#
+#   docker compose -f deploy/compose/ollama.yml up -d
+#   docker exec rag-ollama ollama pull nomic-embed-text
+#   docker exec rag-ollama ollama pull llama3.1:8b
+#
+# On a machine with an NVIDIA GPU, uncomment the deploy block below. Without a
+# GPU it still runs on CPU, only slower; embedding models are small enough that
+# CPU is perfectly usable for Phase 1.
+
+name: rag-ollama
+
+services:
+  ollama:
+    container_name: rag-ollama
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./volumes/ollama:/root/.ollama
+    environment:
+      OLLAMA_KEEP_ALIVE: "10m"
+      OLLAMA_NUM_PARALLEL: "2"
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      start_period: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]

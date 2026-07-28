@@ -1,13 +1,13 @@
 [project]
 name = "production-rag-platform"
 version = "0.1.0"
-description = "Production-grade RAG platform: Milvus, FastAPI, RAGAS evaluation, Kubernetes, CI/CD and observability."
+description = "Production-grade RAG platform: Milvus, FastAPI, RAGAS evaluation, Kubernetes, CI/CD and observability. Runs on local Ollama models or the OpenAI API."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "pymilvus>=2.4.0",
     "chromadb>=0.5.0",
-    "openai>=1.40.0",
+    "httpx>=0.27.0",
     "pydantic>=2.7.0",
     "pydantic-settings>=2.3.0",
     "numpy>=1.26.0",
@@ -15,6 +15,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# The OpenAI SDK is deliberately optional: the default provider is local Ollama,
+# which needs nothing beyond httpx.
+openai = [
+    "openai>=1.40.0",
+]
 dev = [
     "pytest>=8.2.0",
     "ruff>=0.5.0",
@@ -39,5 +44,5 @@ select = ["E", "F", "I", "UP", "B"]
 testpaths = ["tests"]
 addopts = "-q"
 markers = [
-    "integration: requires a running Milvus instance (docker compose -f deploy/compose/milvus.yml up -d)",
+    "integration: requires a running service (Milvus, Ollama) or an API key",
 ]

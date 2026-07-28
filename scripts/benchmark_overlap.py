@@ -5,6 +5,9 @@ latency. The acceptance criterion for Phase 1 is a mean top-5 overlap of at
 least 80 percent; anything lower means the index parameters or the metric type
 diverge and must be fixed before Phase 2 is started.
 
+Both backends are queried with vectors from the *same* embedder, so the only
+variable being measured is the vector store itself.
+
 Usage:
     uv run python scripts/benchmark_overlap.py \\
         --queries evaluation/queries/smoke_queries.json \\
@@ -19,7 +22,7 @@ import statistics
 import time
 from pathlib import Path
 
-from api.embeddings import OpenAIEmbedder
+from api.embeddings import get_embedder
 from api.vectorstore.base import VectorStore
 from api.vectorstore.chroma_store import ChromaStore
 from api.vectorstore.milvus_store import MilvusStore
@@ -32,6 +35,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--queries", type=Path, required=True)
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--out", type=Path, default=Path("docs/benchmark.md"))
+    parser.add_argument("--provider", choices=["openai", "ollama"], default=None)
     return parser.parse_args()
 
 
@@ -54,7 +58,8 @@ def main() -> int:
     args = parse_args()
     queries: list[str] = json.loads(args.queries.read_text(encoding="utf-8"))
 
-    embedder = OpenAIEmbedder()
+    embedder = get_embedder(provider=args.provider)
+    print(f"Embedder: {embedder.describe()}")
     vectors = embedder.embed(queries)
 
     chroma = ChromaStore()
@@ -77,8 +82,10 @@ def main() -> int:
         print(f"{overlap:6.0%}  {milvus_ms:7.1f} ms  {query[:60]}")
 
     mean_overlap = statistics.fmean(overlaps)
+    verdict = "PASS" if mean_overlap >= ACCEPTANCE_THRESHOLD else "FAIL"
     report = f"""# Phase 1 benchmark: ChromaDB vs Milvus
 
+Embedder: {embedder.describe()}
 Queries: {len(queries)} | top_k: {args.top_k} | metric: {milvus.metric_type}
 HNSW: M={milvus.hnsw_m}, efConstruction={milvus.ef_construction}, ef={milvus.ef_search}
 
@@ -95,8 +102,7 @@ HNSW: M={milvus.hnsw_m}, efConstruction={milvus.ef_construction}, ef={milvus.ef_
 | Worst query overlap | {min(overlaps):.1%} |
 | Queries with full overlap | {sum(1 for value in overlaps if value == 1.0)}/{len(overlaps)} |
 
-Acceptance threshold: {ACCEPTANCE_THRESHOLD:.0%} mean overlap -> \
-**{"PASS" if mean_overlap >= ACCEPTANCE_THRESHOLD else "FAIL"}**
+Acceptance threshold: {ACCEPTANCE_THRESHOLD:.0%} mean overlap -> **{verdict}**
 """
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
