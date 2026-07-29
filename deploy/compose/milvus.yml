@@ -7,6 +7,12 @@
 #
 # Volumes are bind-mounted to disk on purpose. Using tmpfs or an anonymous
 # volume means every container restart silently drops the whole collection.
+#
+# All three services use `restart: unless-stopped`. Docker Desktop can be set to
+# start with the host, but a stopped container stays stopped, so without this
+# every reboot leaves Milvus down and the scripts fail late, at MilvusClient(),
+# with an opaque grpc timeout. `unless-stopped` (not `always`) is deliberate: an
+# explicit `docker stop` stays honoured until you start it again.
 
 name: rag-milvus
 
@@ -14,6 +20,7 @@ services:
   etcd:
     container_name: rag-milvus-etcd
     image: quay.io/coreos/etcd:v3.5.14
+    restart: unless-stopped
     environment:
       ETCD_AUTO_COMPACTION_MODE: revision
       ETCD_AUTO_COMPACTION_RETENTION: "1000"
@@ -35,6 +42,7 @@ services:
   minio:
     container_name: rag-milvus-minio
     image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    restart: unless-stopped
     environment:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
@@ -53,6 +61,7 @@ services:
   milvus:
     container_name: rag-milvus-standalone
     image: milvusdb/milvus:v2.4.9
+    restart: unless-stopped
     command: ["milvus", "run", "standalone"]
     security_opt:
       - seccomp:unconfined

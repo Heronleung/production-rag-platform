@@ -3,7 +3,15 @@
 #
 #   docker compose -f deploy/compose/ollama.yml up -d
 #   docker exec rag-ollama ollama pull nomic-embed-text
-#   docker exec rag-ollama ollama pull llama3.1:8b
+#   docker exec rag-ollama ollama pull qwen2.5:1.5b
+#
+# The models must be pulled *inside* the container. A native `ollama pull` on the
+# host writes to ~/.ollama, which this container cannot see; its model store is
+# the ./volumes/ollama bind mount instead.
+#
+# Running Ollama here rather than as a host process is what makes it survive a
+# reboot: `restart: unless-stopped` brings it back with Docker, while a host
+# `ollama serve` dies with its shell and with every `wsl --shutdown`.
 #
 # On a machine with an NVIDIA GPU, uncomment the deploy block below. Without a
 # GPU it still runs on CPU, only slower; embedding models are small enough that
