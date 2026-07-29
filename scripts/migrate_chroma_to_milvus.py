@@ -4,6 +4,12 @@ The existing embeddings are copied as-is, so the migration costs nothing in API
 spend and guarantees that any retrieval difference comes from the index, not
 from re-embedded text.
 
+This script only ever inserts. It cannot recognise a chunk it has already
+written, because the Milvus primary key is auto-generated rather than derived
+from the chunk key. Running it twice therefore duplicates rows. To keep that
+from happening silently, it refuses to run against a non-empty collection
+unless you pass --recreate.
+
 Usage:
     uv run python scripts/migrate_chroma_to_milvus.py --batch-size 1000
     uv run python scripts/migrate_chroma_to_milvus.py --recreate
@@ -24,7 +30,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--recreate",
         action="store_true",
-        help="Drop the Milvus collection first. Required after changing the schema or dim.",
+        help=(
+            "Drop the Milvus collection first. Required after changing the schema or dim, "
+            "and after rebuilding the Chroma baseline with --reset."
+        ),
     )
     parser.add_argument(
         "--skip-index-wait",
@@ -49,6 +58,18 @@ def main() -> int:
         print("Dropping existing Milvus collection.")
         target.drop()
         target = MilvusStore()
+    else:
+        existing = target.count()
+        if existing:
+            print(
+                f"Milvus already holds {existing} chunks and this script only inserts. "
+                "Migrating now would leave those rows behind as duplicates or stale "
+                "content, and every retrieval number measured afterwards would describe "
+                "a polluted collection rather than the baseline. Re-run with --recreate "
+                "to drop the collection first.",
+                file=sys.stderr,
+            )
+            return 1
 
     buffer: list = []
     written = 0
