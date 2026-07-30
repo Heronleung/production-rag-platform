@@ -42,13 +42,15 @@ def _safe_source_name(filename: str | None) -> str:
     """Reduce an uploaded filename to a bare name.
 
     The value is stored as chunk metadata and echoed back to clients, so path
-    components from the client are stripped rather than trusted.
+    components from the client are stripped rather than trusted. Windows-style
+    separators are normalised first, since PurePosixPath does not treat them as
+    separators.
     """
     if not filename:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file has no filename."
         )
-    name = PurePosixPath(filename.replace("\\\\", "/")).name
+    name = PurePosixPath(filename.replace("\\", "/")).name
     if not name or name in {".", ".."}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid filename: {filename!r}"
