@@ -14,7 +14,7 @@ This repository is built phase by phase. See `docs/roadmap.md` for the full plan
 | --- | --- | --- |
 | 0 | Project skeleton, tooling, lint/test setup | in progress |
 | 1 | Replace ChromaDB with Milvus behind a `VectorStore` interface | in progress |
-| 2 | FastAPI backend (`/ingest`, `/query`, SSE streaming) | not started |
+| 2 | FastAPI backend (`/ingest`, `/query`, SSE streaming) | in progress |
 | 3 | Retrieval quality (chunking, MMR, multi-query, reranking) | not started |
 | 4 | RAGAS evaluation pipeline + regression gate | not started |
 | 5 | Next.js frontend | not started |
@@ -115,6 +115,51 @@ uv run pytest -m integration              # requires a running Milvus and Ollama
 
 ---
 
+## Phase 2 quick start: the HTTP API
+
+Full endpoint reference and design notes: **`docs/api.md`**.
+
+```bash
+uv sync --extra dev                       # pulls in fastapi, uvicorn, python-multipart
+uv run uvicorn api.main:app --reload      # http://localhost:8000/docs
+```
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/healthz` | Liveness. Never touches a dependency. |
+| GET | `/readyz` | Readiness. Checks embedder + vector store, returns 503 when either is down. |
+| POST | `/ingest` | Upload a `.pdf`/`.md`/`.txt` file: chunk, embed, store. |
+| POST | `/query` | Retrieve context and answer, streamed as SSE by default. |
+
+```bash
+# ingest a document
+curl -F 'file=@docs/roadmap.md' http://localhost:8000/ingest
+
+# ask a question (SSE stream; -N disables curl's buffering)
+curl -N -X POST http://localhost:8000/query \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "Which indexes does Milvus support?", "top_k": 5}'
+
+# same question, single JSON response instead of a stream
+curl -X POST http://localhost:8000/query \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "Which indexes does Milvus support?", "stream": false}'
+```
+
+Every request gets an `X-Request-ID` (inbound header preserved, otherwise generated). It is
+echoed on the response, attached to every structured JSON log line for that request, and
+included in error bodies - so a user-reported failure can be traced end to end.
+
+The API tests need no services at all: `api/dependencies.py` exposes the embedder, vector store
+and chat model as injected singletons, and `tests/test_api.py` overrides them with
+`HashEmbedder`, `InMemoryStore` and a fake chat model.
+
+```bash
+uv run pytest tests/test_api.py tests/test_chunking.py
+```
+
+---
+
 ## Architecture note: why an interface?
 
 All business logic depends on `api.vectorstore.base.VectorStore`, never on a concrete client.
@@ -137,6 +182,22 @@ api/embeddings/
 ├── base.py             # Embedder (ABC) + HashEmbedder for offline tests
 ├── openai_embedder.py  # hosted
 └── ollama_embedder.py  # local
+```
+
+The HTTP layer sits on top of both and adds nothing of its own beyond transport concerns:
+
+```
+api/
+├── main.py             # app, request-id middleware, JSON error shape
+├── dependencies.py     # cached embedder / store / LLM, the test seam
+├── schemas.py          # Pydantic request+response models -> OpenAPI docs
+├── logging_config.py   # structured JSON logs + request-id context
+└── routers/
+    ├── health.py       # /healthz, /readyz
+    ├── ingest.py       # POST /ingest
+    └── query.py        # POST /query (SSE)
+ingestion/
+└── chunking.py         # splitter shared by POST /ingest and the Phase 1 scripts
 ```
 
 ## Why Milvus over ChromaDB
