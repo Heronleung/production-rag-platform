@@ -36,6 +36,7 @@ class InMemoryStore(VectorStore):
         query_vector: list[float],
         top_k: int = 5,
         source_filter: str | None = None,
+        return_vectors: bool = False,
     ) -> list[SearchHit]:
         candidates = [
             chunk
@@ -48,6 +49,7 @@ class InMemoryStore(VectorStore):
                 source=chunk.source,
                 chunk_index=chunk.chunk_index,
                 score=cosine_similarity(query_vector, chunk.vector),
+                vector=list(chunk.vector) if return_vectors else [],
             )
             for chunk in candidates
         ]

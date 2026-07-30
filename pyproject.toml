@@ -1,6 +1,6 @@
 [project]
 name = "production-rag-platform"
-version = "0.2.0"
+version = "0.3.0"
 description = "Production-grade RAG platform: Milvus, FastAPI, RAGAS evaluation, Kubernetes, CI/CD and observability. Runs on local Ollama models or the OpenAI API."
 readme = "README.md"
 requires-python = ">=3.11"

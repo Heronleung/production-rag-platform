@@ -35,12 +35,17 @@ class SearchHit:
 
     ``score`` is always *higher is better* and normalised to a similarity, even
     when the underlying backend reports a distance.
+
+    ``vector`` is populated only when the caller passes ``return_vectors=True``
+    to :meth:`VectorStore.search`. It is required by the MMR algorithm and is
+    left empty otherwise to avoid unnecessary data transfer.
     """
 
     text: str
     source: str
     chunk_index: int
     score: float
+    vector: list[float] = field(default_factory=list)
 
     @property
     def key(self) -> str:
@@ -62,8 +67,14 @@ class VectorStore(ABC):
         query_vector: list[float],
         top_k: int = 5,
         source_filter: str | None = None,
+        return_vectors: bool = False,
     ) -> list[SearchHit]:
-        """Return the ``top_k`` most similar chunks, best match first."""
+        """Return the ``top_k`` most similar chunks, best match first.
+
+        When ``return_vectors`` is ``True``, each :class:`SearchHit` will have
+        its ``vector`` field populated. This is needed by the MMR algorithm and
+        avoids a second embedding round-trip.
+        """
 
     @abstractmethod
     def count(self) -> int:

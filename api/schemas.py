@@ -31,6 +31,48 @@ class QueryRequest(BaseModel):
         "is returned.",
     )
 
+    # Phase 3: retrieval quality flags.
+    # All default to off so existing clients need no changes.
+
+    use_mmr: bool = Field(
+        default=False,
+        description=(
+            "Apply Maximal Marginal Relevance to the retrieved candidates before "
+            "building context. Reduces redundancy when multiple chunks say the same thing."
+        ),
+    )
+    mmr_lambda: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "MMR relevance/diversity trade-off. 1.0 = pure relevance (degenerates to "
+            "top-k). 0.0 = maximum diversity. Only used when use_mmr=true."
+        ),
+    )
+    mmr_fetch_k: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "How many candidates to fetch before MMR selection. Defaults to top_k * 4. "
+            "Only used when use_mmr=true."
+        ),
+    )
+    multi_query: bool = Field(
+        default=False,
+        description=(
+            "Generate alternative phrasings of the question using the LLM, embed and "
+            "search each one, then merge and deduplicate the results. Improves recall "
+            "when the corpus uses different terminology than the question."
+        ),
+    )
+    multi_query_count: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Number of LLM-generated query variants. Only used when multi_query=true.",
+    )
+
 
 class Citation(BaseModel):
     """One retrieved chunk, returned alongside the answer so the client can

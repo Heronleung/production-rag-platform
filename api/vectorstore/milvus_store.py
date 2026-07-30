@@ -20,7 +20,7 @@ from pymilvus import DataType, MilvusClient
 from api.config import settings
 from api.vectorstore.base import Chunk, SearchHit, VectorStore
 
-OUTPUT_FIELDS = ["text", "source", "chunk_index"]
+_BASE_OUTPUT_FIELDS = ["text", "source", "chunk_index"]
 
 
 class MilvusStore(VectorStore):
@@ -126,21 +126,28 @@ class MilvusStore(VectorStore):
         query_vector: list[float],
         top_k: int = 5,
         source_filter: str | None = None,
+        return_vectors: bool = False,
     ) -> list[SearchHit]:
+        output_fields = list(_BASE_OUTPUT_FIELDS)
+        if return_vectors:
+            # Include the stored vector so the caller can run MMR without a
+            # second embedding round-trip.
+            output_fields.append("vector")
+
         expr = f'source == "{source_filter}"' if source_filter else ""
         results = self.client.search(
             collection_name=self.collection,
             data=[query_vector],
             limit=top_k,
             filter=expr,
-            output_fields=OUTPUT_FIELDS,
+            output_fields=output_fields,
             search_params={"metric_type": self.metric_type, "params": {"ef": self.ef_search}},
         )
         if not results:
             return []
-        return [self._to_hit(raw) for raw in results[0]]
+        return [self._to_hit(raw, return_vectors=return_vectors) for raw in results[0]]
 
-    def _to_hit(self, raw: dict) -> SearchHit:
+    def _to_hit(self, raw: dict, return_vectors: bool = False) -> SearchHit:
         entity = raw.get("entity", raw)
         distance = float(raw.get("distance", 0.0))
         # COSINE and IP already report similarity; L2 reports a distance.
@@ -150,6 +157,7 @@ class MilvusStore(VectorStore):
             source=entity.get("source", ""),
             chunk_index=int(entity.get("chunk_index", -1)),
             score=score,
+            vector=list(entity.get("vector", [])) if return_vectors else [],
         )
 
     def count(self) -> int:
