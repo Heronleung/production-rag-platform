@@ -133,12 +133,17 @@ def query(
             elapsed_seconds=round(elapsed, 3),
         )
 
-    # The generator runs after the response headers are sent, in a worker
-    # thread, so the request id is captured here and restored inside.
+    # The generator body runs after the response headers are sent. Starlette
+    # iterates a sync generator through anyio's thread pool and runs every
+    # next() call in a *fresh copy* of the context, so the ContextVar cannot be
+    # used here: a token set in the first step cannot be reset in the last one
+    # ("Token ... was created in a different Context"), and a value set inside
+    # would not survive to the next step anyway. The id is therefore read once,
+    # here, and passed explicitly to each log call below - JsonFormatter applies
+    # `extra` over the ContextVar value, so the output is unchanged.
     request_id = request_id_var.get()
 
     def event_stream() -> Iterator[str]:
-        token = request_id_var.set(request_id)
         try:
             yield _sse(
                 "citations",
@@ -157,14 +162,13 @@ def query(
                     "hits": len(hits),
                     "streamed": True,
                     "elapsed_seconds": round(elapsed, 3),
+                    "request_id": request_id,
                 },
             )
             yield _sse("done", {"elapsed_seconds": round(elapsed, 3)})
         except Exception as exc:  # noqa: BLE001 - must surface inside the stream
-            logger.exception("query stream failed")
+            logger.exception("query stream failed", extra={"request_id": request_id})
             yield _sse("error", {"detail": f"{type(exc).__name__}: {exc}"})
-        finally:
-            request_id_var.reset(token)
 
     return StreamingResponse(
         event_stream(),

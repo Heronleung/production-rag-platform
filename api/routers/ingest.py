@@ -37,6 +37,13 @@ router = APIRouter(tags=["ingest"])
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 EMBED_BATCH_SIZE = 64
 
+# 413 and 422 are written as literals: Starlette deprecated and renamed the
+# corresponding `status` constants (REQUEST_ENTITY_TOO_LARGE ->
+# CONTENT_TOO_LARGE, UNPROCESSABLE_ENTITY -> UNPROCESSABLE_CONTENT), so the
+# numbers are the version-proof spelling.
+HTTP_413_TOO_LARGE = 413
+HTTP_422_UNPROCESSABLE = 422
+
 
 def _safe_source_name(filename: str | None) -> str:
     """Reduce an uploaded filename to a bare name.
@@ -110,7 +117,7 @@ def ingest(
         )
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=HTTP_413_TOO_LARGE,
             detail=f"File exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)}MB limit.",
         )
 
@@ -118,7 +125,7 @@ def ingest(
     pieces = split_text(text, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     if not pieces:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=HTTP_422_UNPROCESSABLE,
             detail=f"No extractable text found in '{source}'.",
         )
 

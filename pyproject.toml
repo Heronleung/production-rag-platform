@@ -46,6 +46,11 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# tests/ has no __init__.py, so pytest puts tests/ - not the repo root - on
+# sys.path. Without this the suite only imports `api`/`ingestion` when the
+# project itself has been installed into the venv, which bites on a fresh
+# clone and on CI runners.
+pythonpath = ["."]
 addopts = "-q"
 markers = [
     "integration: requires a running service (Milvus, Ollama) or an API key",
