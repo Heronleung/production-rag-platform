@@ -35,6 +35,7 @@ from api.dependencies import get_chat_model, get_embedder_singleton, get_vector_
 from api.embeddings import Embedder
 from api.llm import ChatModel, Message
 from api.logging_config import request_id_var
+from api.retrieval.pipeline import retrieve as retrieval_pipeline
 from api.schemas import Citation, QueryRequest, QueryResponse
 from api.vectorstore.base import SearchHit, VectorStore
 
@@ -59,14 +60,8 @@ def build_messages(question: str, hits: list[SearchHit]) -> list[Message]:
     ]
 
 
-def _retrieve(
-    payload: QueryRequest, embedder: Embedder, store: VectorStore
-) -> tuple[list[SearchHit], list[Citation]]:
-    query_vector = embedder.embed_query(payload.query)
-    hits = store.search(
-        query_vector, top_k=payload.top_k, source_filter=payload.source_filter
-    )
-    citations = [
+def _build_citations(hits: list[SearchHit]) -> list[Citation]:
+    return [
         Citation(
             source=hit.source,
             chunk_index=hit.chunk_index,
@@ -75,7 +70,6 @@ def _retrieve(
         )
         for hit in hits
     ]
-    return hits, citations
 
 
 def _sse(event: str, data: dict[str, object]) -> str:
@@ -103,7 +97,20 @@ def query(
     llm: ChatModel = Depends(get_chat_model),
 ):
     started = time.perf_counter()
-    hits, citations = _retrieve(payload, embedder, store)
+
+    hits = retrieval_pipeline(
+        query=payload.query,
+        embedder=embedder,
+        store=store,
+        llm=llm,
+        top_k=payload.top_k,
+        source_filter=payload.source_filter,
+        use_mmr=payload.use_mmr,
+        mmr_lambda=payload.mmr_lambda,
+        mmr_fetch_k=payload.mmr_fetch_k,
+        multi_query=payload.multi_query,
+        multi_query_count=payload.multi_query_count,
+    )
 
     if not hits:
         raise HTTPException(
@@ -111,6 +118,7 @@ def query(
             detail="No context found. Ingest documents first, or relax source_filter.",
         )
 
+    citations = _build_citations(hits)
     messages = build_messages(payload.query, hits)
 
     if not payload.stream:

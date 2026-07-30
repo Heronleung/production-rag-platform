@@ -15,7 +15,7 @@ This repository is built phase by phase. See `docs/roadmap.md` for the full plan
 | 0 | Project skeleton, tooling, lint/test setup | in progress |
 | 1 | Replace ChromaDB with Milvus behind a `VectorStore` interface | in progress |
 | 2 | FastAPI backend (`/ingest`, `/query`, SSE streaming) | complete |
-| 3 | Retrieval quality (chunking, MMR, multi-query, reranking) | not started |
+| 3 | Retrieval quality (MMR, multi-query) | in progress |
 | 4 | RAGAS evaluation pipeline + regression gate | not started |
 | 5 | Next.js frontend | not started |
 | 6 | Docker + Kubernetes manifests | not started |
@@ -173,6 +173,35 @@ uv run pytest tests/test_api.py tests/test_chunking.py
 
 ---
 
+## Phase 3: retrieval quality
+
+Full design notes: **`docs/retrieval.md`**.
+
+All Phase 3 flags are **off by default**. Existing clients need no changes.
+
+```bash
+# MMR: reduce redundancy among retrieved chunks
+curl -N -X POST http://localhost:8000/query \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "Milvus index types", "top_k": 5, "use_mmr": true, "mmr_lambda": 0.6}'
+
+# Multi-query: expand question into variants, merge results
+curl -N -X POST http://localhost:8000/query \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "approximate nearest neighbour", "top_k": 5, "multi_query": true}'
+
+# Both combined: expand recall, then diversify
+curl -N -X POST http://localhost:8000/query \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "Milvus persistence", "top_k": 5, "use_mmr": true, "multi_query": true}'
+```
+
+```bash
+uv run pytest tests/test_retrieval.py tests/test_api.py tests/test_chunking.py
+```
+
+---
+
 ## Architecture note: why an interface?
 
 All business logic depends on `api.vectorstore.base.VectorStore`, never on a concrete client.
@@ -197,6 +226,15 @@ api/embeddings/
 └── ollama_embedder.py  # local
 ```
 
+The retrieval layer (Phase 3) sits between the vector store and the router:
+
+```
+api/retrieval/
+├── mmr.py          # Maximal Marginal Relevance selection
+├── multi_query.py  # LLM-based query expansion and result merging
+└── pipeline.py     # unified retrieve() called by the query router
+```
+
 The HTTP layer sits on top of both and adds nothing of its own beyond transport concerns:
 
 ```
@@ -208,7 +246,7 @@ api/
 └── routers/
     ├── health.py       # /healthz, /readyz
     ├── ingest.py       # POST /ingest
-    └── query.py        # POST /query (SSE)
+    └── query.py        # POST /query (SSE); calls api.retrieval.pipeline.retrieve()
 ingestion/
 └── chunking.py         # splitter shared by POST /ingest and the Phase 1 scripts
 ```
