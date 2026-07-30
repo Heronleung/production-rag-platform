@@ -28,6 +28,9 @@ data/
 *.db
 *.sqlite3
 
+# Generated evaluation output (reviewed baselines are committed separately)
+evaluation/reports/
+
 # Node (Phase 5)
 node_modules/
 .next/
