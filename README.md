@@ -14,7 +14,7 @@ This repository is built phase by phase. See `docs/roadmap.md` for the full plan
 | --- | --- | --- |
 | 0 | Project skeleton, tooling, lint/test setup | in progress |
 | 1 | Replace ChromaDB with Milvus behind a `VectorStore` interface | in progress |
-| 2 | FastAPI backend (`/ingest`, `/query`, SSE streaming) | in progress |
+| 2 | FastAPI backend (`/ingest`, `/query`, SSE streaming) | complete |
 | 3 | Retrieval quality (chunking, MMR, multi-query, reranking) | not started |
 | 4 | RAGAS evaluation pipeline + regression gate | not started |
 | 5 | Next.js frontend | not started |
@@ -43,6 +43,9 @@ ollama serve
 ollama pull nomic-embed-text     # embeddings, 768 dimensions, ~274MB
 ollama pull qwen2.5:1.5b         # generation, ~1.0GB
 ```
+
+If `ollama serve` reports `address already in use` on port 11434, Ollama is already running as a
+service - skip it and go straight to the pulls.
 
 Or run Ollama in a container instead:
 
@@ -121,8 +124,15 @@ Full endpoint reference and design notes: **`docs/api.md`**.
 
 ```bash
 uv sync --extra dev                       # pulls in fastapi, uvicorn, python-multipart
-uv run uvicorn api.main:app --reload      # http://localhost:8000/docs
+uv run uvicorn api.main:app --reload \
+  --reload-dir api --reload-dir ingestion  # http://localhost:8000/docs
 ```
+
+The `--reload-dir` flags are not optional in practice. Without them WatchFiles walks the entire
+project, including `deploy/compose/volumes/`, where the etcd container creates root-owned
+directories: traversal then fails with `Permission denied`, the reloader process dies and leaves
+the server child orphaned. Watching only the source packages also means no pointless restarts on
+docs or deploy changes.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -132,6 +142,9 @@ uv run uvicorn api.main:app --reload      # http://localhost:8000/docs
 | POST | `/query` | Retrieve context and answer, streamed as SSE by default. |
 
 ```bash
+# confirm the live dependencies before anything else
+curl -s http://localhost:8000/readyz | python3 -m json.tool
+
 # ingest a document
 curl -F 'file=@docs/roadmap.md' http://localhost:8000/ingest
 
