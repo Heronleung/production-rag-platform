@@ -43,45 +43,39 @@ def mmr_select(
 ) -> list[SearchHit]:
     """Return up to ``top_k`` hits selected by the MMR algorithm.
 
-    Parameters
-    ----------
-    query_vector:
-        Embedding of the user’s question.
-    candidates:
-        Hits from an initial over-fetch.  Each hit **must** have a non-empty
-        ``vector`` field (request from the store with ``return_vectors=True``).
-    top_k:
-        Number of hits to select.
-    lambda_:
-        Trade-off coefficient.  ``1.0`` returns the top-relevance ranking;
-        ``0.0`` maximises diversity.  Defaults to ``0.5``.
-
-    Returns
-    -------
-    list[SearchHit]
-        Hits in MMR-selected order (first hit is always the most relevant).
+    Candidate ``score`` cannot be used as original-query relevance here. In a
+    combined multi-query + MMR pipeline that score is the best similarity seen
+    against *any generated query variant*. MMR's formula specifically requires
+    similarity to ``query_vector``, so relevance is recomputed from each stored
+    candidate vector. This is also why the first pick cannot simply trust the
+    incoming candidate order.
     """
     if not candidates:
         return []
-    # Pure relevance: skip the expensive per-step max computation.
+
+    relevance = {hit.key: _cosine(query_vector, hit.vector) for hit in candidates}
+
+    # Pure relevance: return the ranking for the original query, not the
+    # incoming order (which may be ordered by a multi-query variant score).
     if lambda_ >= 1.0:
-        return candidates[:top_k]
+        return sorted(candidates, key=lambda hit: relevance[hit.key], reverse=True)[:top_k]
 
     selected: list[SearchHit] = []
     remaining = list(candidates)
 
     while remaining and len(selected) < top_k:
         if not selected:
-            # First pick is always the highest-relevance candidate so the
-            # answer remains grounded even at low lambda values.
-            best = remaining[0]
+            # First pick is always the candidate most relevant to the original
+            # question, even when the candidate pool came from multi-query.
+            best = max(remaining, key=lambda hit: relevance[hit.key])
         else:
-            selected_vecs = [h.vector for h in selected]
+            selected_vecs = [hit.vector for hit in selected]
             best = max(
                 remaining,
-                key=lambda h: (
-                    lambda_ * h.score
-                    - (1.0 - lambda_) * max(_cosine(h.vector, sv) for sv in selected_vecs)
+                key=lambda hit: (
+                    lambda_ * relevance[hit.key]
+                    - (1.0 - lambda_)
+                    * max(_cosine(hit.vector, vector) for vector in selected_vecs)
                 ),
             )
         selected.append(best)
