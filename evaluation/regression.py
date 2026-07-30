@@ -6,11 +6,14 @@ from dataclasses import dataclass
 
 from evaluation.schema import EvaluationReport
 
+# Only metrics backed by complete top-1/source annotations are hard-gated.
+# key_precision_at_k remains report-only until every acceptable top-k chunk has
+# been reviewed; otherwise its current 0.2 lower bound would create false
+# regressions when another valid but unannotated chunk appears.
 DEFAULT_TOLERANCES = {
     "hit_rate_at_k": 0.0,
     "mrr_at_k": 0.02,
     "source_recall_at_k": 0.02,
-    "key_precision_at_k": 0.02,
 }
 
 

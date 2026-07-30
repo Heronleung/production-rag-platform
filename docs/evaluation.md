@@ -37,27 +37,32 @@ previously left console scripts missing from the virtual environment.
 }
 ```
 
-Only `index-types` has a chunk key verified from a live citation so far. The
-other rows are tagged `needs-chunk-review`. Metrics that require a missing
-annotation are reported as `null`, not zero. This prevents incomplete labelling
-from creating false failures or inflated scores.
+All ten top-ranked chunk keys were manually reviewed from the first live vanilla
+report and are now marked `verified`. The review also aligned reference answers
+with the actual corpus. This matters because an earlier draft described the
+repository's intended implementation in several places while `OCR_test.pdf`
+describes a different hypothetical production design—for example:
 
-Before treating hit rate or MRR as representative, inspect each query's live
-citations and add all acceptable `source::chunk_index` keys. A single-source
-corpus makes source recall easy to satisfy, so chunk-key annotation is the more
-useful signal.
+- the corpus uses a dual embedding strategy and all-MiniLM-L6-v2 for general text;
+- Kubernetes deployment uses ArgoCD and Helm GitOps;
+- secret management uses HashiCorp Vault and the Secrets Store CSI Driver.
+
+Using repository-state answers against that corpus would invalidate LLM-judged
+faithfulness, relevancy and correctness scores.
 
 ## Deterministic metrics
 
-| Metric | Ground truth | Meaning |
-| --- | --- | --- |
-| `hit_rate_at_k` | chunk keys | 1 when any expected chunk appears in top-k |
-| `mrr_at_k` | chunk keys | reciprocal rank of the first expected chunk |
-| `key_precision_at_k` | chunk keys | fraction of retrieved keys explicitly marked relevant |
-| `source_recall_at_k` | sources | fraction of expected sources represented |
+| Metric | Ground truth | Meaning | Gate status |
+| --- | --- | --- | --- |
+| `hit_rate_at_k` | verified top chunks | 1 when an expected chunk appears in top-k | hard gate |
+| `mrr_at_k` | verified top chunks | reciprocal rank of the first expected chunk | hard gate |
+| `source_recall_at_k` | sources | fraction of expected sources represented | hard gate |
+| `key_precision_at_k` | all acceptable keys | fraction of retrieved keys explicitly marked relevant | report only |
 
-The aggregate ignores `null` samples for that metric. It never silently treats
-an unlabelled question as a miss.
+Only the top-ranked chunk for each question has been reviewed. Consequently,
+`key_precision_at_k = 0.2` currently means one verified key among five retrieved
+keys; it is a lower bound, not evidence that the other four chunks are wrong.
+It remains report-only until every acceptable top-k chunk is annotated.
 
 ## Run an evaluation
 
@@ -114,11 +119,10 @@ Default allowed drops:
 | hit rate | 0.00 |
 | MRR | 0.02 |
 | source recall | 0.02 |
-| key precision | 0.02 |
 
-Latency is reported but not hard-gated on a developer laptop because model
-loading and host contention make it noisy. Phase 7 can gate latency in a stable
-runner environment.
+Key precision and latency are reported but not hard-gated. Key precision needs
+complete top-k annotation. Laptop latency is noisy because model loading and
+host contention vary; Phase 7 can gate it in a stable runner environment.
 
 ## Tests
 
