@@ -1,0 +1,7 @@
+apiVersion: v2
+name: rag-platform
+description: FastAPI and Next.js application layer for the Production RAG Platform
+type: application
+version: 0.1.0
+appVersion: "0.6.0"
+kubeVersion: ">=1.28.0-0"

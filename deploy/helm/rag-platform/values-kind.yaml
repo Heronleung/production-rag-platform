@@ -1,0 +1,19 @@
+api:
+  image:
+    repository: rag-api
+    tag: dev
+    pullPolicy: IfNotPresent
+  env:
+    OLLAMA_BASE_URL: http://host.docker.internal:11434
+    MILVUS_URI: http://host.docker.internal:19530
+
+web:
+  image:
+    repository: rag-web
+    tag: dev
+    pullPolicy: IfNotPresent
+
+ingress:
+  enabled: true
+  className: nginx
+  host: rag.local

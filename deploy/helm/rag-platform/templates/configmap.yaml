@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "rag-platform.apiName" . }}
+  labels:
+    {{- include "rag-platform.labels" . | nindent 4 }}
+data:
+  {{- range $key, $value := .Values.api.env }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "rag-platform.webName" . }}
+  labels:
+    {{- include "rag-platform.labels" . | nindent 4 }}
+data:
+  RAG_API_URL: {{ default (printf "http://%s:%v" (include "rag-platform.apiName" .) .Values.api.service.port) .Values.web.ragApiUrl | quote }}
+  NEXT_TELEMETRY_DISABLED: "1"
