@@ -91,9 +91,28 @@ Confirm the gateway for your Docker setup before using it; do not assume `172.17
 ## Health semantics
 
 - API `/healthz`: process-only liveness; never checks dependencies.
-- API `/readyz`: Milvus/embedder readiness; returns 503 when unavailable.
+- API `/readyz`: validates the embedder, configured chat model, and Milvus. Ollama readiness calls `/api/tags` and returns 503 when the configured model is absent.
 - Web `/healthz`: frontend-only liveness; does not restart the web Pod when the API is down.
 - Web `/api/ready`: user-facing composite readiness proxied to the API.
+
+A healthy response contains `embedder`, `chat_model`, and `vector_store` dependency entries. Verify the missing-model transition without generating tokens:
+
+```bash
+helm upgrade rag deploy/helm/rag-platform \
+  --namespace rag --reuse-values \
+  --set-string api.env.OLLAMA_LLM_MODEL=missing-readiness-model \
+  --wait --timeout 90s || true
+
+curl -i --resolve rag.local:8080:127.0.0.1 \
+  http://rag.local:8080/api/ready
+
+helm upgrade rag deploy/helm/rag-platform \
+  --namespace rag --reuse-values \
+  --set-string api.env.OLLAMA_LLM_MODEL=qwen2.5:3b \
+  --wait --timeout 5m
+```
+
+The invalid model rollout is expected to fail readiness while the previous healthy API Pod remains available because `maxUnavailable` is zero.
 
 ## SSE and uploads
 
