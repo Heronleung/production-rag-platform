@@ -32,12 +32,20 @@ class ChatModel(ABC):
     def describe(self) -> str:
         return f"{self.name}:{self.model}"
 
+    def check_ready(self) -> str:
+        """Validate lightweight provider readiness and return a probe detail."""
+        return self.describe()
+
 
 class OpenAIChat(ChatModel):
     name = "openai"
 
-    def __init__(self, model: str | None = None, api_key: str | None = None,
-                 base_url: str | None = None) -> None:
+    def __init__(
+        self,
+        model: str | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+    ) -> None:
         try:
             from openai import OpenAI
         except ImportError as exc:  # pragma: no cover - depends on install extras
@@ -74,8 +82,12 @@ class OpenAIChat(ChatModel):
 class OllamaChat(ChatModel):
     name = "ollama"
 
-    def __init__(self, model: str | None = None, base_url: str | None = None,
-                 timeout: float | None = None) -> None:
+    def __init__(
+        self,
+        model: str | None = None,
+        base_url: str | None = None,
+        timeout: float | None = None,
+    ) -> None:
         self.model = model or settings.ollama_llm_model
         self.base_url = (base_url or settings.ollama_base_url).rstrip("/")
         self._timeout = timeout or settings.ollama_timeout_seconds
@@ -111,6 +123,32 @@ class OllamaChat(ChatModel):
                         yield fragment
                     if event.get("done"):
                         return
+
+    def check_ready(self) -> str:
+        """Confirm that Ollama is reachable and the configured chat model exists."""
+        with httpx.Client(base_url=self.base_url, timeout=self._timeout) as client:
+            response = client.get("/api/tags")
+            response.raise_for_status()
+
+        models = response.json().get("models", [])
+        available = {
+            value
+            for item in models
+            for value in (item.get("name"), item.get("model"))
+            if isinstance(value, str) and value
+        }
+        aliases = {self.model}
+        if self.model.endswith(":latest"):
+            aliases.add(self.model.removesuffix(":latest"))
+        elif ":" not in self.model:
+            aliases.add(f"{self.model}:latest")
+
+        if aliases.isdisjoint(available):
+            listed = ", ".join(sorted(available)) or "none"
+            raise RuntimeError(
+                f"Ollama model '{self.model}' is unavailable; available models: {listed}"
+            )
+        return self.describe()
 
 
 def get_llm(provider: Provider | None = None, model: str | None = None) -> ChatModel:
