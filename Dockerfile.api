@@ -17,7 +17,8 @@ COPY ingestion ./ingestion
 COPY evaluation ./evaluation
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-editable
+    uv sync --frozen --no-dev --no-editable && \
+    /app/.venv/bin/python -c "import fastapi, multipart, uvicorn"
 
 FROM ${PYTHON_IMAGE} AS runtime
 
