@@ -47,7 +47,7 @@ curl -f http://localhost:3000/api/ready
 
 ## kind deployment
 
-Requirements: Docker, kind, kubectl, and Helm.
+Requirements: Docker, kind, kubectl, and Helm 3.
 
 ```bash
 bash deploy/scripts/kind-up.sh
@@ -61,6 +61,20 @@ Add this hosts entry once:
 ```
 
 Then open <http://rag.local:8080>.
+
+The kind profile uses `qwen2.5:3b`, the model verified during the Phase 6 ingress acceptance test. Pull that model into the exact Ollama instance resolved by `host.docker.internal` before deploying:
+
+```bash
+ollama pull qwen2.5:3b
+```
+
+A Docker Compose Ollama container and a host-native Ollama process can have different model stores even when both listen on port 11434. Compare the models visible from the container and from the Kubernetes API pod when a query returns `model not found`:
+
+```bash
+docker exec rag-ollama ollama list
+kubectl -n rag exec deploy/rag-rag-platform-api -- python -c \
+  'import httpx; print(httpx.get("http://host.docker.internal:11434/api/tags").text)'
+```
 
 The local chart values use `host.docker.internal` for Milvus and Ollama. Docker Desktop provides this hostname. On native Linux, set explicit reachable gateway URLs instead:
 
@@ -88,6 +102,8 @@ The Ingress disables response and request buffering, uses 180-second proxy timeo
 ```bash
 SMOKE_FILE=/path/to/OCR_test.pdf bash deploy/scripts/smoke-k8s.sh
 ```
+
+A passing stream emits `citations`, one or more `token` events, and a final `done` event without an `error` event.
 
 ## Security defaults
 
