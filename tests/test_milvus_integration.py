@@ -14,11 +14,10 @@ import os
 import uuid
 
 import pytest
+from conftest import EMBEDDING_DIM
 
 from api.embeddings import HashEmbedder
 from api.vectorstore.base import Chunk
-
-from conftest import EMBEDDING_DIM
 
 pytestmark = pytest.mark.integration
 

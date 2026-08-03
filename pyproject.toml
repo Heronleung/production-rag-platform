@@ -44,6 +44,11 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
+# FastAPI evaluates these declarative parameter markers once at import time.
+# They are immutable route metadata rather than mutable runtime defaults.
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Query"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # tests/ has no __init__.py, so pytest puts tests/ - not the repo root - on

@@ -7,12 +7,11 @@ rest of the codebase can switch to it without any further change.
 from __future__ import annotations
 
 import pytest
+from conftest import EMBEDDING_DIM
 
 from api.embeddings import HashEmbedder
 from api.vectorstore.base import Chunk, VectorStore
 from api.vectorstore.memory_store import InMemoryStore
-
-from conftest import EMBEDDING_DIM
 
 
 @pytest.fixture
