@@ -6,8 +6,6 @@ FakeLLM so they run fully offline.
 
 from __future__ import annotations
 
-import pytest
-
 from api.retrieval.mmr import mmr_select
 from api.retrieval.multi_query import expand_queries, multi_query_search
 from api.retrieval.pipeline import retrieve
@@ -97,13 +95,12 @@ def test_mmr_avoids_near_duplicate() -> None:
     """With pure diversity (lambda=0), a near-duplicate should not be second pick."""
     candidates = [
         SearchHit(text="a", source="s", chunk_index=0, score=0.9, vector=[1, 0, 0, 0]),
-        SearchHit(text="b", source="s", chunk_index=1, score=0.85, vector=[1, 0, 0, 0]),  # clone
-        SearchHit(text="c", source="s", chunk_index=2, score=0.5, vector=[0, 0, 1, 0]),  # diverse
+        SearchHit(text="b", source="s", chunk_index=1, score=0.85, vector=[1, 0, 0, 0]),
+        SearchHit(text="c", source="s", chunk_index=2, score=0.5, vector=[0, 0, 1, 0]),
     ]
     result = mmr_select([1, 0, 0, 0], candidates, top_k=2, lambda_=0.0)
     assert len(result) == 2
     selected_indices = {h.chunk_index for h in result}
-    # chunk 1 is a clone of chunk 0; the diverse chunk 2 should be preferred
     assert 1 not in selected_indices
     assert 2 in selected_indices
 
@@ -151,7 +148,7 @@ def test_expand_queries_truncates_to_count() -> None:
 def test_expand_queries_fallback_on_bad_json() -> None:
     llm = FakeLLM("this is not json at all")
     variants = expand_queries("original", llm, count=3)
-    assert variants == []  # graceful fallback
+    assert variants == []
 
 
 def test_expand_queries_fallback_on_non_list_json() -> None:
@@ -186,7 +183,7 @@ def test_multi_query_fallback_on_bad_llm() -> None:
     llm = FakeLLM("not json")
     embedder = FakeEmbedder()
     hits = multi_query_search("q", llm, embedder, store, top_k=5, source_filter=None, count=3)
-    assert len(hits) >= 1  # original question still searched
+    assert len(hits) >= 1
 
 
 # ---------------------------------------------------------------------------
@@ -203,27 +200,40 @@ def test_pipeline_vanilla_returns_hits() -> None:
 def test_pipeline_mmr_removes_near_duplicate() -> None:
     """With pure diversity, a near-duplicate chunk should be dropped."""
     store = InMemoryStore(dim=DIM)
-    store.upsert([
-        Chunk(text="t0", source="s", chunk_index=0, vector=[1, 0, 0, 0]),
-        Chunk(text="t1", source="s", chunk_index=1, vector=[1, 0, 0, 0]),  # near-duplicate
-        Chunk(text="t2", source="s", chunk_index=2, vector=[0, 1, 0, 0]),  # diverse
-    ])
+    store.upsert(
+        [
+            Chunk(text="t0", source="s", chunk_index=0, vector=[1, 0, 0, 0]),
+            Chunk(text="t1", source="s", chunk_index=1, vector=[1, 0, 0, 0]),
+            Chunk(text="t2", source="s", chunk_index=2, vector=[0, 1, 0, 0]),
+        ]
+    )
     hits = retrieve(
-        "q", FakeEmbedder(), store, FakeLLM(), top_k=2,
-        use_mmr=True, mmr_lambda=0.0, mmr_fetch_k=3,
+        "q",
+        FakeEmbedder(),
+        store,
+        FakeLLM(),
+        top_k=2,
+        use_mmr=True,
+        mmr_lambda=0.0,
+        mmr_fetch_k=3,
     )
     assert len(hits) == 2
     indices = {h.chunk_index for h in hits}
-    assert 0 in indices   # first pick: highest relevance
-    assert 1 not in indices  # near-duplicate should be dropped
-    assert 2 in indices   # diverse chunk preferred
+    assert 0 in indices
+    assert 1 not in indices
+    assert 2 in indices
 
 
 def test_pipeline_multi_query_no_duplicate_keys() -> None:
     store = _store([1, 0, 0, 0], [0, 1, 0, 0])
     hits = retrieve(
-        "q", FakeEmbedder(), store, FakeLLM('["variant"]'),
-        top_k=5, multi_query=True, multi_query_count=1,
+        "q",
+        FakeEmbedder(),
+        store,
+        FakeLLM('["variant"]'),
+        top_k=5,
+        multi_query=True,
+        multi_query_count=1,
     )
     keys = [h.key for h in hits]
     assert len(keys) == len(set(keys))
@@ -232,7 +242,9 @@ def test_pipeline_multi_query_no_duplicate_keys() -> None:
 def test_pipeline_defaults_match_phase2_behaviour() -> None:
     """With all flags at default (off), results must match a plain store.search()."""
     store = InMemoryStore(dim=DIM)
-    store.upsert([Chunk(text="only", source="x.md", chunk_index=0, vector=[1, 0, 0, 0])])
+    store.upsert(
+        [Chunk(text="only", source="x.md", chunk_index=0, vector=[1, 0, 0, 0])]
+    )
     hits = retrieve("q", FakeEmbedder(), store, FakeLLM(), top_k=5)
     assert len(hits) == 1
     assert hits[0].source == "x.md"
