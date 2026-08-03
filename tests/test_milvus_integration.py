@@ -18,7 +18,7 @@ import pytest
 from api.embeddings import HashEmbedder
 from api.vectorstore.base import Chunk
 
-from .conftest import EMBEDDING_DIM
+from conftest import EMBEDDING_DIM
 
 pytestmark = pytest.mark.integration
 
@@ -39,8 +39,9 @@ def milvus_store():
         store.drop()
 
 
-def test_insert_then_search(milvus_store, sample_chunks: list[Chunk],
-                            embedder: HashEmbedder) -> None:
+def test_insert_then_search(
+    milvus_store, sample_chunks: list[Chunk], embedder: HashEmbedder
+) -> None:
     milvus_store.upsert(sample_chunks)
     milvus_store.wait_for_index()
     milvus_store.client.load_collection(milvus_store.collection)
@@ -53,8 +54,9 @@ def test_insert_then_search(milvus_store, sample_chunks: list[Chunk],
     assert hits[0].source == "milvus.md"
 
 
-def test_source_filter(milvus_store, sample_chunks: list[Chunk],
-                       embedder: HashEmbedder) -> None:
+def test_source_filter(
+    milvus_store, sample_chunks: list[Chunk], embedder: HashEmbedder
+) -> None:
     milvus_store.upsert(sample_chunks)
     milvus_store.wait_for_index()
     milvus_store.client.load_collection(milvus_store.collection)

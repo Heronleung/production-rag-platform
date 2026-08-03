@@ -12,7 +12,7 @@ from api.embeddings import HashEmbedder
 from api.vectorstore.base import Chunk, VectorStore
 from api.vectorstore.memory_store import InMemoryStore
 
-from .conftest import EMBEDDING_DIM
+from conftest import EMBEDDING_DIM
 
 
 @pytest.fixture
@@ -42,23 +42,26 @@ def test_search_returns_the_closest_chunk(
     assert hits[0].source == "milvus.md"
 
 
-def test_search_respects_top_k(store: VectorStore, sample_chunks: list[Chunk],
-                               embedder: HashEmbedder) -> None:
+def test_search_respects_top_k(
+    store: VectorStore, sample_chunks: list[Chunk], embedder: HashEmbedder
+) -> None:
     store.upsert(sample_chunks)
     query = embedder.embed(["anything"])[0]
     assert len(store.search(query, top_k=2)) <= 2
 
 
-def test_scores_are_sorted_descending(store: VectorStore, sample_chunks: list[Chunk],
-                                      embedder: HashEmbedder) -> None:
+def test_scores_are_sorted_descending(
+    store: VectorStore, sample_chunks: list[Chunk], embedder: HashEmbedder
+) -> None:
     store.upsert(sample_chunks)
     query = embedder.embed(["Kubernetes autoscaling"])[0]
     scores = [hit.score for hit in store.search(query, top_k=4)]
     assert scores == sorted(scores, reverse=True)
 
 
-def test_source_filter(store: VectorStore, sample_chunks: list[Chunk],
-                       embedder: HashEmbedder) -> None:
+def test_source_filter(
+    store: VectorStore, sample_chunks: list[Chunk], embedder: HashEmbedder
+) -> None:
     store.upsert(sample_chunks)
     query = embedder.embed(["Milvus"])[0]
     hits = store.search(query, top_k=5, source_filter="k8s.md")
