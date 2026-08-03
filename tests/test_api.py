@@ -123,7 +123,11 @@ def test_readyz_reports_dependencies(client: TestClient) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ready"
-    assert {dep["name"] for dep in body["dependencies"]} == {"embedder", "vector_store"}
+    assert {dep["name"] for dep in body["dependencies"]} == {
+        "embedder",
+        "chat_model",
+        "vector_store",
+    }
 
 
 def test_openapi_documents_both_endpoints(client: TestClient) -> None:
@@ -161,7 +165,7 @@ def test_ingest_rejects_empty_file(client: TestClient) -> None:
 
 
 def test_ingest_rejects_text_without_content(client: TestClient) -> None:
-    response = client.post("/ingest", files={"file": ("blank.txt", b"   \n  ", "text/plain")})
+    response = _ingest(client, name="blank.txt", body="   \n  ")
     assert response.status_code == 422
 
 
@@ -186,8 +190,10 @@ def test_query_non_streaming_returns_answer_and_citations(
     client: TestClient, chat: FakeChat
 ) -> None:
     _ingest(client)
-    response = client.post("/query", json={"query": "Which indexes does Milvus support?",
-                                           "stream": False, "top_k": 2})
+    response = client.post(
+        "/query",
+        json={"query": "Which indexes does Milvus support?", "stream": False, "top_k": 2},
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["answer"] == chat.answer
