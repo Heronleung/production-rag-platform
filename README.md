@@ -1,264 +1,277 @@
 # Production RAG Platform
 
-A production-grade Retrieval-Augmented Generation platform: **Milvus** vector store, **FastAPI**
-backend, **RAGAS** evaluation, **Kubernetes** deployment, **GitHub Actions** CI/CD and
-**Prometheus + Grafana** observability.
+A production-oriented Retrieval-Augmented Generation platform built around **Milvus**, **FastAPI**, **Next.js**, and local **Ollama** models. OpenAI remains available behind the same provider interfaces.
 
-The whole stack runs locally with **no API key**: embeddings and generation default to
-[Ollama](https://ollama.com). OpenAI is supported as a drop-in alternative behind the same
-interface.
+The repository is developed in independently verified phases. Work through Phase 6 is complete: ingestion, retrieval, evaluation, the frontend, container images, and a local Kubernetes deployment are implemented and tested. CI/CD and observability remain future phases.
 
-This repository is built phase by phase. See `docs/roadmap.md` for the full plan.
+## Roadmap status
 
 | Phase | Scope | Status |
 | --- | --- | --- |
-| 0 | Project skeleton, tooling, lint/test setup | in progress |
-| 1 | Replace ChromaDB with Milvus behind a `VectorStore` interface | in progress |
-| 2 | FastAPI backend (`/ingest`, `/query`, SSE streaming) | complete |
-| 3 | Retrieval quality (MMR, multi-query) | in progress |
-| 4 | RAGAS evaluation pipeline + regression gate | not started |
-| 5 | Next.js frontend | not started |
-| 6 | Docker + Kubernetes manifests | not started |
+| 0 | Project skeleton and tooling | complete |
+| 1 | Milvus behind a `VectorStore` interface | complete |
+| 2 | FastAPI ingestion/query API and SSE streaming | complete |
+| 3 | MMR and multi-query retrieval | complete |
+| 4 | Deterministic evaluation and regression gate | complete |
+| 5 | Next.js frontend | complete |
+| 6 | Containers, kind, Helm, ingress, security and rollback | complete |
 | 7 | CI/CD pipeline | not started |
-| 8 | Monitoring + documentation | not started |
+| 8 | Observability and final operational documentation | not started |
 
----
+See [`docs/roadmap.md`](docs/roadmap.md) for the broader plan.
 
-## Phase 1 quick start
+## Architecture
 
-### 1. Install dependencies
+```text
+Browser
+  │
+  ▼
+Next.js web application
+  │  /api/ready, /api/ingest, /api/query
+  ▼
+FastAPI
+  ├── ingestion/chunking.py
+  ├── Ollama or OpenAI embeddings
+  ├── Milvus vector store
+  ├── vanilla / MMR / multi-query retrieval
+  └── Ollama or OpenAI chat generation
+```
+
+The core boundaries are interfaces:
+
+- `api.embeddings.Embedder`
+- `api.llm.ChatModel`
+- `api.vectorstore.base.VectorStore`
+
+Tests replace external providers with deterministic in-memory implementations, while integration tests exercise Milvus separately.
+
+## Requirements
+
+- Python 3.11+
+- `uv`
+- Node.js 22+
+- Docker
+- Ollama
+- For Kubernetes: kind, kubectl, and Helm 3
+
+## Local API quick start
+
+Install the locked development environment:
 
 ```bash
-uv sync --extra dev
+uv sync --frozen --extra dev
 cp .env.example .env
 ```
 
-The defaults in `.env.example` are already local-only. Nothing needs to be filled in unless you
-want to switch to OpenAI.
-
-### 2. Start the local models
+Start Ollama and pull the default local models:
 
 ```bash
 ollama serve
-ollama pull nomic-embed-text     # embeddings, 768 dimensions, ~274MB
-ollama pull qwen2.5:1.5b         # generation, ~1.0GB
+ollama pull nomic-embed-text
+ollama pull qwen2.5:1.5b
 ```
 
-If `ollama serve` reports `address already in use` on port 11434, Ollama is already running as a
-service - skip it and go straight to the pulls.
+If port 11434 is already in use, Ollama is already running; do not start a second instance.
 
-Or run Ollama in a container instead:
-
-```bash
-docker compose -f deploy/compose/ollama.yml up -d
-docker exec rag-ollama ollama pull nomic-embed-text
-docker exec rag-ollama ollama pull qwen2.5:1.5b
-```
-
-#### Choosing a chat model
-
-| Model | Size | When to use it |
-| --- | --- | --- |
-| `qwen2.5:0.5b` | ~0.4GB | Smoke tests and CI only. Do not publish benchmark numbers from it. |
-| `qwen2.5:1.5b` | ~1.0GB | **Default.** Runs on CPU, strong for its size, good Chinese support. |
-| `llama3.2:3b` | ~2.0GB | Better instruction following and citation discipline. |
-| `llama3.1:8b` | ~4.7GB | Best quality here, but wants a GPU or 16GB+ RAM. |
-
-The chat model can be changed at any time - it never touches stored vectors. The **embedding**
-model cannot: its dimension is baked into the Milvus collection schema, so changing it means
-re-embedding everything and recreating the collection.
-
-### 3. Verify the embedder before touching Milvus
-
-```bash
-uv run python scripts/check_embedder.py
-```
-
-This prints the provider, model, configured dimension and the dimension actually returned by a
-live call. It exits non-zero if they disagree.
-
-### 4. Start Milvus standalone
-
-Milvus standalone is not a single container: it needs `etcd` for metadata and `MinIO` for object
-storage.
+Start Milvus:
 
 ```bash
 docker compose -f deploy/compose/milvus.yml up -d
-curl -f http://localhost:9091/healthz    # expect: OK
+curl -f http://localhost:9091/healthz
 ```
 
-### 5. Migrate existing ChromaDB embeddings into Milvus
-
-The migration reuses the embeddings already stored in Chroma, so no re-embedding cost is incurred.
-This only works if the Chroma data was produced by the same embedding model that is configured
-now - otherwise the dimensions will not match and you need to re-embed instead.
+Run the API with a scoped reloader:
 
 ```bash
-uv run python scripts/migrate_chroma_to_milvus.py --batch-size 1000
+uv run python -m uvicorn api.main:app \
+  --reload \
+  --reload-dir api \
+  --reload-dir ingestion
 ```
 
-### 6. Verify parity between the two backends
+The scoped reload directories avoid traversing root-owned Docker volumes under `deploy/compose/volumes/`.
 
-```bash
-uv run python scripts/benchmark_overlap.py \
-  --queries evaluation/queries/smoke_queries.json \
-  --top-k 5 \
-  --out docs/benchmark.md
-```
-
-Acceptance criterion: **top-5 overlap between Chroma and Milvus >= 80%**.
-
-### 7. Run the test suite
-
-```bash
-uv run ruff check .
-uv run pytest -m "not integration"        # contract tests, no services required
-uv run pytest -m integration              # requires a running Milvus and Ollama
-```
-
----
-
-## Phase 2 quick start: the HTTP API
-
-Full endpoint reference and design notes: **`docs/api.md`**.
-
-```bash
-uv sync --extra dev                       # pulls in fastapi, uvicorn, python-multipart
-uv run uvicorn api.main:app --reload \
-  --reload-dir api --reload-dir ingestion  # http://localhost:8000/docs
-```
-
-The `--reload-dir` flags are not optional in practice. Without them WatchFiles walks the entire
-project, including `deploy/compose/volumes/`, where the etcd container creates root-owned
-directories: traversal then fails with `Permission denied`, the reloader process dies and leaves
-the server child orphaned. Watching only the source packages also means no pointless restarts on
-docs or deploy changes.
+### API endpoints
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/healthz` | Liveness. Never touches a dependency. |
-| GET | `/readyz` | Readiness. Checks embedder + vector store, returns 503 when either is down. |
-| POST | `/ingest` | Upload a `.pdf`/`.md`/`.txt` file: chunk, embed, store. |
-| POST | `/query` | Retrieve context and answer, streamed as SSE by default. |
+| GET | `/healthz` | Process-only liveness; never touches dependencies |
+| GET | `/readyz` | Checks the embedder, configured chat model, and Milvus; returns 503 when any is unavailable |
+| POST | `/ingest` | Upload and index a PDF, Markdown, or text file |
+| POST | `/query` | Retrieve context and answer; SSE by default |
 
 ```bash
-# confirm the live dependencies before anything else
-curl -s http://localhost:8000/readyz | python3 -m json.tool
+curl -sS http://localhost:8000/readyz | python3 -m json.tool
 
-# ingest a document
-curl -F 'file=@docs/roadmap.md' http://localhost:8000/ingest
+curl -F 'file=@docs/roadmap.md' \
+  http://localhost:8000/ingest
 
-# ask a question (SSE stream; -N disables curl's buffering)
 curl -N -X POST http://localhost:8000/query \
   -H 'Content-Type: application/json' \
-  -d '{"query": "Which indexes does Milvus support?", "top_k": 5}'
-
-# same question, single JSON response instead of a stream
-curl -X POST http://localhost:8000/query \
-  -H 'Content-Type: application/json' \
-  -d '{"query": "Which indexes does Milvus support?", "stream": false}'
+  -d '{"query":"Which indexes does Milvus support?","top_k":5}'
 ```
 
-Every request gets an `X-Request-ID` (inbound header preserved, otherwise generated). It is
-echoed on the response, attached to every structured JSON log line for that request, and
-included in error bodies - so a user-reported failure can be traced end to end.
+A successful SSE response emits `citations`, one or more `token` events, and `done`. Mid-stream failures are emitted as `error` events because the HTTP headers have already been sent.
 
-The API tests need no services at all: `api/dependencies.py` exposes the embedder, vector store
-and chat model as injected singletons, and `tests/test_api.py` overrides them with
-`HashEmbedder`, `InMemoryStore` and a fake chat model.
+Every request receives an `X-Request-ID`. An inbound value is preserved; otherwise one is generated and attached to response headers, structured logs, and error bodies.
+
+## Retrieval and evaluation
+
+Retrieval flags are disabled by default, preserving the Phase 2 behavior:
 
 ```bash
-uv run pytest tests/test_api.py tests/test_chunking.py
+curl -N -X POST http://localhost:8000/query \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "query":"Milvus persistence",
+    "top_k":5,
+    "use_mmr":true,
+    "multi_query":true
+  }'
 ```
 
----
-
-## Phase 3: retrieval quality
-
-Full design notes: **`docs/retrieval.md`**.
-
-All Phase 3 flags are **off by default**. Existing clients need no changes.
+Run the deterministic evaluation and regression gate:
 
 ```bash
-# MMR: reduce redundancy among retrieved chunks
-curl -N -X POST http://localhost:8000/query \
-  -H 'Content-Type: application/json' \
-  -d '{"query": "Milvus index types", "top_k": 5, "use_mmr": true, "mmr_lambda": 0.6}'
-
-# Multi-query: expand question into variants, merge results
-curl -N -X POST http://localhost:8000/query \
-  -H 'Content-Type: application/json' \
-  -d '{"query": "approximate nearest neighbour", "top_k": 5, "multi_query": true}'
-
-# Both combined: expand recall, then diversify
-curl -N -X POST http://localhost:8000/query \
-  -H 'Content-Type: application/json' \
-  -d '{"query": "Milvus persistence", "top_k": 5, "use_mmr": true, "multi_query": true}'
+uv run python scripts/evaluate.py
 ```
+
+The golden dataset compares vanilla, MMR, multi-query, and combined retrieval. Optional Ragas integration remains deferred rather than being required for the deterministic gate.
+
+## Frontend
 
 ```bash
-uv run pytest tests/test_retrieval.py tests/test_api.py tests/test_chunking.py
+cd web
+npm ci
+npm run dev
 ```
 
----
+Open <http://localhost:3000>. The UI supports readiness checks, document ingestion, SSE token streaming, citations, Stop, and Retry.
 
-## Architecture note: why an interface?
+Production verification:
 
-All business logic depends on `api.vectorstore.base.VectorStore`, never on a concrete client.
-That makes the backend swap a configuration change instead of a rewrite, and it lets the same
-contract test suite run against every implementation:
-
-```
-api/vectorstore/
-├── base.py           # Chunk, SearchHit, VectorStore (ABC)
-├── memory_store.py   # pure-Python reference implementation, used in unit tests
-├── chroma_store.py   # legacy backend, kept for migration + parity benchmarking
-└── milvus_store.py   # production backend, HNSW index
+```bash
+npm run lint
+npm run typecheck
+npm test
+npm run build
+npm audit
 ```
 
-The model layer follows the same shape, which is what makes the OpenAI/Ollama switch a one-line
-change in `.env`:
+## Containers and Kubernetes
 
-```
-api/embeddings/
-├── base.py             # Embedder (ABC) + HashEmbedder for offline tests
-├── openai_embedder.py  # hosted
-└── ollama_embedder.py  # local
-```
+Full deployment and recovery instructions are in [`docs/deployment.md`](docs/deployment.md).
 
-The retrieval layer (Phase 3) sits between the vector store and the router:
+### Local Compose application layer
 
-```
-api/retrieval/
-├── mmr.py          # Maximal Marginal Relevance selection
-├── multi_query.py  # LLM-based query expansion and result merging
-└── pipeline.py     # unified retrieve() called by the query router
+```bash
+docker compose -f deploy/compose/app.yml up --build -d
+curl -f http://localhost:8000/healthz
+curl -f http://localhost:3000/healthz
+curl -f http://localhost:3000/api/ready
 ```
 
-The HTTP layer sits on top of both and adds nothing of its own beyond transport concerns:
+### kind and Helm
 
-```
-api/
-├── main.py             # app, request-id middleware, JSON error shape
-├── dependencies.py     # cached embedder / store / LLM, the test seam
-├── schemas.py          # Pydantic request+response models -> OpenAPI docs
-├── logging_config.py   # structured JSON logs + request-id context
-└── routers/
-    ├── health.py       # /healthz, /readyz
-    ├── ingest.py       # POST /ingest
-    └── query.py        # POST /query (SSE); calls api.retrieval.pipeline.retrieve()
-ingestion/
-└── chunking.py         # splitter shared by POST /ingest and the Phase 1 scripts
+The verified kind profile uses the host-accessible Ollama model `qwen2.5:3b`:
+
+```bash
+ollama pull qwen2.5:3b
+
+bash deploy/scripts/kind-up.sh
+bash deploy/scripts/build-and-load.sh
 ```
 
-## Why Milvus over ChromaDB
+Add the local hostname once:
 
-| Concern | ChromaDB | Milvus |
-| --- | --- | --- |
-| Horizontal scale | single node | sharding + replication |
-| Index options | HNSW only | HNSW, IVF_FLAT, IVF_PQ, DiskANN, SCANN |
-| Filtered search | basic metadata filter | scalar field expressions, partition keys |
-| Operations | embedded library | standalone/distributed service, K8s ready |
+```text
+127.0.0.1 rag.local
+```
 
-The trade-off is operational complexity: Milvus requires etcd and MinIO, persistent volumes, and
-an explicit `load_collection()` step before any search can be served.
+Then open <http://rag.local:8080>.
+
+The verified readiness response contains:
+
+- `embedder: ollama:nomic-embed-text`
+- `chat_model: ollama:qwen2.5:3b`
+- `vector_store: rag_chunks`
+
+Ollama readiness calls `/api/tags` and confirms that the configured chat model exists. A missing model returns 503, keeps the replacement pod out of Service endpoints, and prevents a bad Helm rollout.
+
+### Immutable deployment
+
+```bash
+TAG="phase6-$(git rev-parse --short=12 HEAD)"
+
+docker build -f Dockerfile.api -t "rag-api:${TAG}" .
+docker build -f web/Dockerfile -t "rag-web:${TAG}" web
+
+kind load docker-image --name rag \
+  "rag-api:${TAG}" \
+  "rag-web:${TAG}"
+
+helm upgrade --install rag deploy/helm/rag-platform \
+  --namespace rag \
+  --create-namespace \
+  -f deploy/helm/rag-platform/values-kind.yaml \
+  --set-string "api.image.tag=${TAG}" \
+  --set-string "web.image.tag=${TAG}" \
+  --wait \
+  --timeout 5m
+```
+
+Smoke check:
+
+```bash
+bash deploy/scripts/smoke-k8s.sh
+```
+
+### Security defaults
+
+The API and web containers:
+
+- Run as non-root users
+- Use read-only root filesystems
+- Drop all Linux capabilities
+- Deny privilege escalation
+- Use the `RuntimeDefault` seccomp profile
+- Mount writable temporary directories only where required
+
+Provider secrets are referenced through an existing Kubernetes Secret and are not stored in chart values or image history.
+
+NetworkPolicy remains disabled for the local kind profile because host dependency CIDRs vary by Docker installation. The chart includes the policy template; enable it only after configuring stable `networkPolicy.allowedExternalCIDRs` for Milvus and Ollama.
+
+## Verification
+
+Python:
+
+```bash
+uv run ruff check api tests
+uv run pytest -m "not integration"
+uv run pytest -m integration
+```
+
+Helm:
+
+```bash
+helm lint deploy/helm/rag-platform \
+  -f deploy/helm/rag-platform/values-kind.yaml
+
+helm template rag deploy/helm/rag-platform \
+  --namespace rag \
+  -f deploy/helm/rag-platform/values-kind.yaml \
+  > /tmp/rag-rendered.yaml
+
+kubectl apply --dry-run=server \
+  --namespace rag \
+  -f /tmp/rag-rendered.yaml
+```
+
+Warnings about `kubectl.kubernetes.io/last-applied-configuration` are expected during the server-side dry run because the live resources are managed by Helm rather than `kubectl apply`.
+
+## Documentation
+
+- [`docs/api.md`](docs/api.md) — HTTP API and SSE contract
+- [`docs/retrieval.md`](docs/retrieval.md) — MMR and multi-query retrieval
+- [`docs/deployment.md`](docs/deployment.md) — containers, kind, Helm, ingress, security, recovery and rollback
+- [`docs/roadmap.md`](docs/roadmap.md) — phase roadmap
