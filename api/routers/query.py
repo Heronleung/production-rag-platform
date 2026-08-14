@@ -1,25 +1,4 @@
-"""``POST /query`` - retrieve context, then answer with the configured LLM.
-
-Two response shapes behind one endpoint:
-
-* ``stream: false`` -> a single :class:`QueryResponse` JSON body. Easiest to test
-  and to call from scripts.
-* ``stream: true`` (default) -> Server-Sent Events. The client sees citations
-  first, then answer tokens as they are produced, then a terminating event.
-  SSE is used instead of WebSockets because the traffic is one-way and it needs
-  no protocol upgrade, so plain HTTP proxies and Kubernetes ingresses work.
-
-SSE event contract::
-
-    event: citations   data: {"citations": [...], "llm_model": "..."}
-    event: token       data: {"text": "partial answer"}
-    event: done        data: {"elapsed_seconds": 1.23}
-    event: error       data: {"detail": "..."}
-
-Errors raised mid-stream cannot change the HTTP status code, because the headers
-have already been sent. They are therefore delivered as an ``error`` event and
-the client must handle it explicitly.
-"""
+"""POST /query - retrieve context, then answer with a selected LLM."""
 
 from __future__ import annotations
 
@@ -28,12 +7,12 @@ import logging
 import time
 from collections.abc import Iterator
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
 from api.dependencies import get_chat_model, get_embedder_singleton, get_vector_store
 from api.embeddings import Embedder
-from api.llm import ChatModel, Message
+from api.llm import ChatModel, Message, get_llm
 from api.logging_config import request_id_var
 from api.retrieval.pipeline import retrieve as retrieval_pipeline
 from api.schemas import Citation, QueryRequest, QueryResponse
@@ -76,27 +55,38 @@ def _sse(event: str, data: dict[str, object]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def _select_chat_model(request: Request, payload: QueryRequest) -> ChatModel:
+    if payload.llm_provider is None and payload.llm_model is None:
+        resolver = request.app.dependency_overrides.get(get_chat_model, get_chat_model)
+        return resolver()
+    try:
+        return get_llm(provider=payload.llm_provider, model=payload.llm_model)
+    except (ImportError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+
 @router.post(
     "/query",
     response_model=QueryResponse,
     summary="Answer a question over the ingested corpus",
     responses={
         200: {
-            "content": {
-                "text/event-stream": {},
-                "application/json": {},
-            },
-            "description": "SSE stream when `stream` is true, otherwise a JSON body.",
+            "content": {"text/event-stream": {}, "application/json": {}},
+            "description": "SSE stream when stream is true, otherwise JSON.",
         }
     },
 )
 def query(
     payload: QueryRequest,
+    request: Request,
     embedder: Embedder = Depends(get_embedder_singleton),
     store: VectorStore = Depends(get_vector_store),
-    llm: ChatModel = Depends(get_chat_model),
 ):
     started = time.perf_counter()
+    llm = _select_chat_model(request, payload)
 
     hits = retrieval_pipeline(
         query=payload.query,
@@ -130,6 +120,7 @@ def query(
                 "top_k": payload.top_k,
                 "hits": len(hits),
                 "streamed": False,
+                "llm_model": llm.describe(),
                 "elapsed_seconds": round(elapsed, 3),
             },
         )
@@ -141,14 +132,6 @@ def query(
             elapsed_seconds=round(elapsed, 3),
         )
 
-    # The generator body runs after the response headers are sent. Starlette
-    # iterates a sync generator through anyio's thread pool and runs every
-    # next() call in a *fresh copy* of the context, so the ContextVar cannot be
-    # used here: a token set in the first step cannot be reset in the last one
-    # ("Token ... was created in a different Context"), and a value set inside
-    # would not survive to the next step anyway. The id is therefore read once,
-    # here, and passed explicitly to each log call below - JsonFormatter applies
-    # `extra` over the ContextVar value, so the output is unchanged.
     request_id = request_id_var.get()
 
     def event_stream() -> Iterator[str]:
@@ -169,22 +152,18 @@ def query(
                     "top_k": payload.top_k,
                     "hits": len(hits),
                     "streamed": True,
+                    "llm_model": llm.describe(),
                     "elapsed_seconds": round(elapsed, 3),
                     "request_id": request_id,
                 },
             )
             yield _sse("done", {"elapsed_seconds": round(elapsed, 3)})
-        except Exception as exc:  # noqa: BLE001 - must surface inside the stream
+        except Exception as exc:  # noqa: BLE001
             logger.exception("query stream failed", extra={"request_id": request_id})
             yield _sse("error", {"detail": f"{type(exc).__name__}: {exc}"})
 
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            # Tells nginx-style proxies not to buffer, which would otherwise
-            # hold tokens back and destroy the point of streaming.
-            "X-Accel-Buffering": "no",
-        },
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
