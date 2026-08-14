@@ -1,3 +1,5 @@
+export type LlmProvider = "ollama" | "deepseek" | "openai";
+
 export type Citation = {
   source: string;
   chunk_index: number;
@@ -13,6 +15,8 @@ export type QuerySettings = {
   mmrLambda: number;
   multiQuery: boolean;
   multiQueryCount: number;
+  llmProvider: LlmProvider;
+  llmModel: string;
 };
 
 export type QueryPayload = {
@@ -25,6 +29,15 @@ export type QueryPayload = {
   mmr_lambda: number;
   multi_query: boolean;
   multi_query_count: number;
+  llm_provider: LlmProvider;
+  llm_model: string;
+};
+
+export type LlmCheckResponse = {
+  ok: boolean;
+  provider: LlmProvider;
+  model: string;
+  detail: string;
 };
 
 export type ReadinessDependency = {

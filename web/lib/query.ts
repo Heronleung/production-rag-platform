@@ -1,4 +1,10 @@
-import type { QueryPayload, QuerySettings } from "./types";
+import type { LlmProvider, QueryPayload, QuerySettings } from "./types";
+
+export const DEFAULT_MODELS: Record<LlmProvider, string> = {
+  ollama: "qwen2.5:3b",
+  deepseek: "deepseek-chat",
+  openai: "gpt-4o-mini",
+};
 
 export const DEFAULT_QUERY_SETTINGS: QuerySettings = {
   topK: 5,
@@ -8,6 +14,8 @@ export const DEFAULT_QUERY_SETTINGS: QuerySettings = {
   mmrLambda: 0.5,
   multiQuery: false,
   multiQueryCount: 3,
+  llmProvider: "ollama",
+  llmModel: DEFAULT_MODELS.ollama,
 };
 
 export function toQueryPayload(question: string, settings: QuerySettings): QueryPayload {
@@ -22,5 +30,7 @@ export function toQueryPayload(question: string, settings: QuerySettings): Query
     mmr_lambda: settings.mmrLambda,
     multi_query: settings.multiQuery,
     multi_query_count: settings.multiQueryCount,
+    llm_provider: settings.llmProvider,
+    llm_model: settings.llmModel.trim() || DEFAULT_MODELS[settings.llmProvider],
   };
 }
