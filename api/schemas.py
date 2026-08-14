@@ -1,13 +1,10 @@
-"""Pydantic request/response models for the HTTP API.
-
-Keeping these out of the router functions is what makes the auto-generated
-OpenAPI docs at ``/docs`` useful: every field carries a type, a constraint and,
-where the meaning is not obvious, a description.
-"""
+"""Pydantic request and response models for the HTTP API."""
 
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
+
+from api.config import LLMProvider
 
 
 class IngestResponse(BaseModel):
@@ -27,57 +24,58 @@ class QueryRequest(BaseModel):
     temperature: float = Field(0.0, ge=0.0, le=2.0, description="Sampling temperature.")
     stream: bool = Field(
         default=True,
-        description="When true the answer is streamed as SSE; when false a single JSON body "
-        "is returned.",
+        description="When true the answer is streamed as SSE; otherwise JSON is returned.",
     )
-
-    # Phase 3: retrieval quality flags.
-    # All default to off so existing clients need no changes.
-
+    llm_provider: LLMProvider | None = Field(
+        default=None,
+        description="Optional per-request chat provider. Defaults to server configuration.",
+    )
+    llm_model: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=200,
+        description="Optional per-request chat model. API keys remain server-side.",
+    )
     use_mmr: bool = Field(
         default=False,
-        description=(
-            "Apply Maximal Marginal Relevance to the retrieved candidates before "
-            "building context. Reduces redundancy when multiple chunks say the same thing."
-        ),
+        description="Apply Maximal Marginal Relevance to reduce redundant passages.",
     )
     mmr_lambda: float = Field(
         default=0.5,
         ge=0.0,
         le=1.0,
-        description=(
-            "MMR relevance/diversity trade-off. 1.0 = pure relevance (degenerates to "
-            "top-k). 0.0 = maximum diversity. Only used when use_mmr=true."
-        ),
+        description="MMR relevance/diversity trade-off.",
     )
     mmr_fetch_k: int | None = Field(
         default=None,
         ge=1,
-        description=(
-            "How many candidates to fetch before MMR selection. Defaults to top_k * 4. "
-            "Only used when use_mmr=true."
-        ),
+        description="Candidates to fetch before MMR selection. Defaults to top_k * 4.",
     )
     multi_query: bool = Field(
         default=False,
-        description=(
-            "Generate alternative phrasings of the question using the LLM, embed and "
-            "search each one, then merge and deduplicate the results. Improves recall "
-            "when the corpus uses different terminology than the question."
-        ),
+        description="Generate alternative phrasings and merge their retrieval results.",
     )
     multi_query_count: int = Field(
         default=3,
         ge=1,
         le=10,
-        description="Number of LLM-generated query variants. Only used when multi_query=true.",
+        description="Number of generated query variants.",
     )
 
 
-class Citation(BaseModel):
-    """One retrieved chunk, returned alongside the answer so the client can
-    show where each claim came from."""
+class LLMCheckRequest(BaseModel):
+    provider: LLMProvider
+    model: str | None = Field(default=None, min_length=1, max_length=200)
 
+
+class LLMCheckResponse(BaseModel):
+    ok: bool
+    provider: LLMProvider
+    model: str
+    detail: str
+
+
+class Citation(BaseModel):
     source: str
     chunk_index: int
     score: float

@@ -11,11 +11,17 @@ services:
       LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
-      OLLAMA_LLM_MODEL: ${OLLAMA_LLM_MODEL:-qwen2.5:1.5b}
+      OLLAMA_LLM_MODEL: ${OLLAMA_LLM_MODEL:-qwen2.5:3b}
       OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-120}
+      HOSTED_LLM_TIMEOUT_SECONDS: ${HOSTED_LLM_TIMEOUT_SECONDS:-120}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_LLM_MODEL: ${OPENAI_LLM_MODEL:-gpt-4o-mini}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      DEEPSEEK_LLM_MODEL: ${DEEPSEEK_LLM_MODEL:-deepseek-chat}
       MILVUS_URI: ${MILVUS_URI:-http://host.docker.internal:19530}
       MILVUS_COLLECTION: ${MILVUS_COLLECTION:-rag_chunks}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       MILVUS_TOKEN: ${MILVUS_TOKEN:-}
     extra_hosts:
       - host.docker.internal:host-gateway

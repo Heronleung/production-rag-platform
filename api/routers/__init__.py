@@ -1,3 +1,3 @@
-from api.routers import health, ingest, query
+from api.routers import health, ingest, llm, query
 
-__all__ = ["health", "ingest", "query"]
+__all__ = ["health", "ingest", "llm", "query"]

@@ -1,8 +1,4 @@
-"""Chat model providers, mirroring the embedding provider split.
-
-Phase 2 consumes this module; it lives here now so that both providers stay in
-step and the Phase 1 configuration already describes the whole system.
-"""
+"""Chat model providers with a shared streaming contract."""
 
 from __future__ import annotations
 
@@ -12,7 +8,7 @@ from collections.abc import Iterator
 
 import httpx
 
-from api.config import Provider, settings
+from api.config import LLMProvider, settings
 
 Message = dict[str, str]
 
@@ -33,50 +29,127 @@ class ChatModel(ABC):
         return f"{self.name}:{self.model}"
 
     def check_ready(self) -> str:
-        """Validate lightweight provider readiness and return a probe detail."""
         return self.describe()
 
 
-class OpenAIChat(ChatModel):
-    name = "openai"
+class OpenAICompatibleChat(ChatModel):
+    """HTTP client shared by OpenAI and DeepSeek without exposing API keys."""
 
+    def __init__(
+        self,
+        *,
+        name: str,
+        model: str,
+        api_key: str,
+        base_url: str,
+        timeout: float,
+    ) -> None:
+        if not api_key:
+            env_name = "OPENAI_API_KEY" if name == "openai" else "DEEPSEEK_API_KEY"
+            raise ValueError(f"{env_name} is empty; configure it on the backend server.")
+        self.name = name
+        self.model = model
+        self.base_url = base_url.rstrip("/")
+        self._api_key = api_key
+        self._timeout = timeout
+
+    @property
+    def _headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self._api_key}"}
+
+    def _raise_for_status(self, response: httpx.Response) -> None:
+        if response.is_success:
+            return
+        status_code = response.status_code
+        if status_code in {401, 403}:
+            detail = "authentication failed"
+        elif status_code == 404:
+            detail = f"model '{self.model}' or endpoint was not found"
+        elif status_code == 429:
+            detail = "rate limit or quota exceeded"
+        else:
+            detail = f"upstream returned HTTP {status_code}"
+        raise RuntimeError(f"{self.name} {detail}")
+
+    def complete(self, messages: list[Message], temperature: float = 0.0) -> str:
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "stream": False,
+        }
+        with httpx.Client(base_url=self.base_url, timeout=self._timeout) as client:
+            response = client.post("/chat/completions", headers=self._headers, json=payload)
+        self._raise_for_status(response)
+        return response.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+
+    def stream(self, messages: list[Message], temperature: float = 0.0) -> Iterator[str]:
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "stream": True,
+        }
+        with httpx.Client(base_url=self.base_url, timeout=self._timeout) as client:
+            with client.stream(
+                "POST", "/chat/completions", headers=self._headers, json=payload
+            ) as response:
+                self._raise_for_status(response)
+                for line in response.iter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data = line.removeprefix("data:").strip()
+                    if data == "[DONE]":
+                        return
+                    event = json.loads(data)
+                    fragment = event.get("choices", [{}])[0].get("delta", {}).get("content")
+                    if fragment:
+                        yield fragment
+
+    def check_ready(self) -> str:
+        with httpx.Client(base_url=self.base_url, timeout=self._timeout) as client:
+            response = client.get("/models", headers=self._headers)
+        self._raise_for_status(response)
+        model_ids = {
+            item.get("id")
+            for item in response.json().get("data", [])
+            if isinstance(item, dict) and isinstance(item.get("id"), str)
+        }
+        if model_ids and self.model not in model_ids:
+            raise RuntimeError(f"{self.name} model '{self.model}' is unavailable")
+        return self.describe()
+
+
+class OpenAIChat(OpenAICompatibleChat):
     def __init__(
         self,
         model: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
     ) -> None:
-        try:
-            from openai import OpenAI
-        except ImportError as exc:  # pragma: no cover - depends on install extras
-            raise ImportError(
-                "The 'openai' package is not installed. Run `uv sync --extra openai`, "
-                "or set LLM_PROVIDER=ollama to use local models instead."
-            ) from exc
-
-        key = api_key or settings.openai_api_key
-        if not key:
-            raise ValueError(
-                "OPENAI_API_KEY is empty. Set it in .env, or set LLM_PROVIDER=ollama."
-            )
-        self.model = model or settings.openai_llm_model
-        url = base_url or settings.openai_base_url
-        self._client = OpenAI(api_key=key, base_url=url) if url else OpenAI(api_key=key)
-
-    def complete(self, messages: list[Message], temperature: float = 0.0) -> str:
-        response = self._client.chat.completions.create(
-            model=self.model, messages=messages, temperature=temperature
+        super().__init__(
+            name="openai",
+            model=model or settings.openai_llm_model,
+            api_key=settings.openai_api_key if api_key is None else api_key,
+            base_url=base_url or settings.openai_base_url,
+            timeout=settings.hosted_llm_timeout_seconds,
         )
-        return response.choices[0].message.content or ""
 
-    def stream(self, messages: list[Message], temperature: float = 0.0) -> Iterator[str]:
-        stream = self._client.chat.completions.create(
-            model=self.model, messages=messages, temperature=temperature, stream=True
+
+class DeepSeekChat(OpenAICompatibleChat):
+    def __init__(
+        self,
+        model: str | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+    ) -> None:
+        super().__init__(
+            name="deepseek",
+            model=model or settings.deepseek_llm_model,
+            api_key=settings.deepseek_api_key if api_key is None else api_key,
+            base_url=base_url or settings.deepseek_base_url,
+            timeout=settings.hosted_llm_timeout_seconds,
         )
-        for chunk in stream:
-            delta = chunk.choices[0].delta.content
-            if delta:
-                yield delta
 
 
 class OllamaChat(ChatModel):
@@ -125,7 +198,6 @@ class OllamaChat(ChatModel):
                         return
 
     def check_ready(self) -> str:
-        """Confirm that Ollama is reachable and the configured chat model exists."""
         with httpx.Client(base_url=self.base_url, timeout=self._timeout) as client:
             response = client.get("/api/tags")
             response.raise_for_status()
@@ -151,10 +223,14 @@ class OllamaChat(ChatModel):
         return self.describe()
 
 
-def get_llm(provider: Provider | None = None, model: str | None = None) -> ChatModel:
-    provider = provider or settings.llm_provider
-    if provider == "openai":
+def get_llm(provider: LLMProvider | None = None, model: str | None = None) -> ChatModel:
+    selected = provider or settings.llm_provider
+    if selected == "openai":
         return OpenAIChat(model=model)
-    if provider == "ollama":
+    if selected == "deepseek":
+        return DeepSeekChat(model=model)
+    if selected == "ollama":
         return OllamaChat(model=model)
-    raise ValueError(f"Unknown LLM provider: {provider!r}. Use 'openai' or 'ollama'.")
+    raise ValueError(
+        f"Unknown LLM provider: {selected!r}. Use 'openai', 'deepseek', or 'ollama'."
+    )
