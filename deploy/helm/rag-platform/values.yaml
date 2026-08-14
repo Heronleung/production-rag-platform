@@ -10,14 +10,21 @@ api:
     pullPolicy: IfNotPresent
   service:
     port: 8000
+  # The referenced Secret may contain OPENAI_API_KEY and DEEPSEEK_API_KEY.
+  # Never place either key under api.env because api.env renders to a ConfigMap.
   existingSecret: ""
   env:
     EMBEDDING_PROVIDER: ollama
     LLM_PROVIDER: ollama
     OLLAMA_BASE_URL: http://host.docker.internal:11434
     OLLAMA_EMBEDDING_MODEL: nomic-embed-text
-    OLLAMA_LLM_MODEL: qwen2.5:1.5b
+    OLLAMA_LLM_MODEL: qwen2.5:3b
     OLLAMA_TIMEOUT_SECONDS: "120"
+    HOSTED_LLM_TIMEOUT_SECONDS: "120"
+    OPENAI_BASE_URL: https://api.openai.com/v1
+    OPENAI_LLM_MODEL: gpt-4o-mini
+    DEEPSEEK_BASE_URL: https://api.deepseek.com
+    DEEPSEEK_LLM_MODEL: deepseek-chat
     MILVUS_URI: http://host.docker.internal:19530
     MILVUS_COLLECTION: rag_chunks
     MILVUS_METRIC_TYPE: COSINE
